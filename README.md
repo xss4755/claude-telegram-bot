@@ -145,7 +145,7 @@ On macOS, the service runs as a LaunchAgent and restarts automatically after cra
 1. User sends a message to the Telegram bot (optionally prefixed with inline flags)
 2. Bot parses inline flags and merges them with the user's persistent settings to determine effective parameters
 3. Bot looks up the user's last `session_id` from `sessions.json`
-4. Runs `claude -p --output-format stream-json [--resume <session_id>] [--effort <level>] [--model <name>] "<prompt>"` in `CLAUDE_WORK_DIR`
+4. Runs `claude -p --output-format stream-json --verbose [--resume <session_id>] [--effort <level>] [--model <name>] "<prompt>"` in `CLAUDE_WORK_DIR` (with `CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1` injected via env)
 5. Parses the stream-json output to extract the assistant's text and new `session_id`
 6. Saves the new `session_id` for continuity, then replies to the user
 
@@ -153,7 +153,8 @@ On macOS, the service runs as a LaunchAgent and restarts automatically after cra
 
 - `.env`, `sessions.json`, `keys.json`, and `settings.json` are all excluded from git via `.gitignore`
 - Only users in `TG_ALLOWED_IDS` can trigger Claude Code execution
-- The bot uses `--dangerously-skip-permissions` for non-interactive use — ensure your `CLAUDE_WORK_DIR` and allowed users are trusted
+- The bot sets `CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1` for non-interactive use — ensure your `CLAUDE_WORK_DIR` and allowed users are trusted
+- Subprocess stability: 300-second timeout prevents hanging, `stdin=DEVNULL` prevents CLI blocking, `--verbose` ensures stable output in non-interactive mode
 
 ## License
 

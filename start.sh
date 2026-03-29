@@ -17,4 +17,4 @@ echo "🚀 启动 Claude Code Bot..."
 echo "   工作目录: $CLAUDE_WORK_DIR"
 echo "   允许用户: $TG_ALLOWED_IDS"
 
-python3 "$SCRIPT_DIR/bot.py"
+"$SCRIPT_DIR/venv/bin/python" "$SCRIPT_DIR/bot.py"
