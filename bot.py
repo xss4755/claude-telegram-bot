@@ -248,7 +248,8 @@ async def run_claude(prompt: str, session_id: str | None = None, key_config: dic
     cmd = [
         CLAUDE_BIN, "-p",
         "--output-format", "stream-json",
-        "--verbose",
+        "--verbose",                        # 新版 CLI 要求；旧版兼容无副作用
+        # "--dangerously-skip-permissions" 移除，改用环境变量注入，兼容 root 环境
     ]
     if session_id:
         cmd += ["--resume", session_id]
@@ -267,6 +268,7 @@ async def run_claude(prompt: str, session_id: str | None = None, key_config: dic
     cmd.append(prompt)
 
     env = os.environ.copy()
+    env["CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS"] = "1"   # 替代 --dangerously-skip-permissions，兼容 root 环境
     if key_config:
         if key_config.get("api_key"):
             env["ANTHROPIC_API_KEY"] = key_config["api_key"]
@@ -281,12 +283,21 @@ async def run_claude(prompt: str, session_id: str | None = None, key_config: dic
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
+        stdin=asyncio.subprocess.DEVNULL,  # 显式关闭 stdin，防止 CLI 等待输入导致卡死
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=WORK_DIR,
         env=env,
     )
-    stdout, stderr = await proc.communicate()
+
+    # 添加超时机制，避免长时间执行阻塞 Telegram 响应
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        logger.error("Claude CLI 执行超时（300秒），已终止")
+        return "❌ 执行超时（5分钟），已终止进程", None, False
 
     stderr_text = stderr.decode("utf-8", errors="replace").strip()
     is_key_error = detect_key_error(stderr_text, proc.returncode)
