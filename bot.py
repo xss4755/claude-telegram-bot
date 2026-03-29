@@ -11,6 +11,7 @@ import signal
 import json
 import asyncio
 import logging
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 from telegram import Update, BotCommand
@@ -281,6 +282,7 @@ async def run_claude(prompt: str, session_id: str | None = None, key_config: dic
     logger.info("完整命令: %s", " ".join(cmd[:-1]) + f" '{cmd[-1][:50]}...'")
     logger.info("环境变量: CLAUDE_BIN=%s, PATH=%s", CLAUDE_BIN, env.get("PATH", "未设置"))
 
+    t_start = time.time()
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdin=asyncio.subprocess.DEVNULL,  # 显式关闭 stdin，防止 CLI 等待输入导致卡死
@@ -289,15 +291,19 @@ async def run_claude(prompt: str, session_id: str | None = None, key_config: dic
         cwd=WORK_DIR,
         env=env,
     )
+    logger.info("⏱ subprocess 启动耗时: %.2fs", time.time() - t_start)
 
     # 添加超时机制，避免长时间执行阻塞 Telegram 响应
+    t_exec = time.time()
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        logger.error("Claude CLI 执行超时（300秒），已终止")
-        return "❌ 执行超时（5分钟），已终止进程", None, False
+        logger.error("Claude CLI 执行超时（120秒），已终止")
+        return "❌ 执行超时（2分钟），已终止进程", None, False
+    finally:
+        logger.info("⏱ claude 执行总耗时: %.2fs", time.time() - t_exec)
 
     stderr_text = stderr.decode("utf-8", errors="replace").strip()
     is_key_error = detect_key_error(stderr_text, proc.returncode)
@@ -628,49 +634,68 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         logger.info("内联覆盖: user=%d, overrides=%s, effective=%s", uid, overrides, effective_settings)
 
     thinking = await update.message.reply_text("⏳ 正在处理，请稍候...")
-    session_id = get_session(uid)
+    t_msg = time.time()
 
-    # 构建重试队列：系统环境变量优先，然后是 keys.json
-    retry_queue = []
-    if os.getenv("ANTHROPIC_API_KEY"):
-        retry_queue.append({"name": "系统环境", "api_key": None, "base_url": None})
+    # 进度计时器：每 15 秒更新等待提示
+    async def _tick():
+        """每 15 秒更新等待提示，显示已等待时间"""
+        while True:
+            await asyncio.sleep(15)
+            elapsed = int(time.time() - t_msg)
+            try:
+                await thinking.edit_text(f"⏳ 正在处理，请稍候...（已等待 {elapsed}s）")
+            except Exception:
+                pass  # 编辑失败不影响主流程
 
-    enabled_keys = [k for k in key_manager.data["keys"] if k.get("enabled", True)]
-    retry_queue.extend(enabled_keys)
+    timer = asyncio.create_task(_tick())
 
-    if not retry_queue:
-        await thinking.edit_text("❌ 未配置 API Key\n请设置环境变量或使用 /key add 添加")
-        return
+    try:
+        session_id = get_session(uid)
 
-    result, new_session_id, is_key_error = None, None, False
+        # 构建重试队列：系统环境变量优先，然后是 keys.json
+        retry_queue = []
+        if os.getenv("ANTHROPIC_API_KEY"):
+            retry_queue.append({"name": "系统环境", "api_key": None, "base_url": None})
 
-    for attempt, key_config in enumerate(retry_queue):
-        try:
-            result, new_session_id, is_key_error = await run_claude(prompt, session_id, key_config, effective_settings)
-        except Exception as e:
-            logger.exception("run_claude 异常")
-            await thinking.edit_text(f"❌ 内部错误：{e}")
+        enabled_keys = [k for k in key_manager.data["keys"] if k.get("enabled", True)]
+        retry_queue.extend(enabled_keys)
+
+        if not retry_queue:
+            await thinking.edit_text("❌ 未配置 API Key\n请设置环境变量或使用 /key add 添加")
             return
 
-        if not is_key_error:
-            break
+        result, new_session_id, is_key_error = None, None, False
 
-        # Key 错误，尝试下一个
-        if attempt < len(retry_queue) - 1:
-            next_key = retry_queue[attempt + 1]
-            key_name = key_config.get("name", "未知")
-            next_name = next_key.get("name", "未知")
-            await thinking.edit_text(f"⚠️ Key [{key_name}] 出错，切换到 [{next_name}]...")
-            clear_session(uid)
-            session_id = None
-            await asyncio.sleep(1)
+        for attempt, key_config in enumerate(retry_queue):
+            try:
+                result, new_session_id, is_key_error = await run_claude(prompt, session_id, key_config, effective_settings)
+            except Exception as e:
+                logger.exception("run_claude 异常")
+                await thinking.edit_text(f"❌ 内部错误：{e}")
+                return
 
-    if new_session_id:
-        save_session(uid, new_session_id)
+            if not is_key_error:
+                break
 
-    await thinking.delete()
-    for chunk in split_text(result):
-        await update.message.reply_text(chunk)
+            # Key 错误，尝试下一个
+            if attempt < len(retry_queue) - 1:
+                next_key = retry_queue[attempt + 1]
+                key_name = key_config.get("name", "未知")
+                next_name = next_key.get("name", "未知")
+                await thinking.edit_text(f"⚠️ Key [{key_name}] 出错，切换到 [{next_name}]...")
+                clear_session(uid)
+                session_id = None
+                await asyncio.sleep(1)
+
+        if new_session_id:
+            save_session(uid, new_session_id)
+
+        await thinking.delete()
+        for chunk in split_text(result):
+            await update.message.reply_text(chunk)
+    finally:
+        timer.cancel()
+        logger.info("⏱ handle_message 总耗时: %.2fs", time.time() - t_msg)
 
 
 # ── 主入口 ────────────────────────────────────────────────────────────────────
