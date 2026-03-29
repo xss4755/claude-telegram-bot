@@ -18,7 +18,7 @@ from telegram.constants import ParseMode
 # ── 配置 ──────────────────────────────────────────────────────────────────────
 BOT_TOKEN   = os.getenv("TG_BOT_TOKEN", "")
 ALLOWED_IDS = set(int(x) for x in os.getenv("TG_ALLOWED_IDS", "").split(",") if x.strip())
-WORK_DIR    = os.getenv("CLAUDE_WORK_DIR", "/Users/0xiaoyu/AI/duihua")
+WORK_DIR    = os.getenv("CLAUDE_WORK_DIR", "")
 CLAUDE_BIN  = os.getenv("CLAUDE_BIN", "/opt/homebrew/bin/claude")
 MAX_MSG_LEN = 4000  # Telegram 单条消息上限 4096，留余量
 

@@ -9,11 +9,11 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/0xiaoyu/code/tg-claude/start.sh</string>
+        <string>/path/to/tg-claude/start.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/0xiaoyu/code/tg-claude</string>
+    <string>/path/to/tg-claude</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -22,9 +22,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/Users/0xiaoyu/code/tg-claude/bot.log</string>
+    <string>/path/to/tg-claude/bot.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/0xiaoyu/code/tg-claude/bot.error.log</string>
+    <string>/path/to/tg-claude/bot.error.log</string>
 </dict>
 </plist>
