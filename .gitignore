@@ -2,6 +2,7 @@
 .env
 sessions.json
 keys.json
+settings.json
 
 # 日志
 bot.log
