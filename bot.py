@@ -14,6 +14,7 @@ import logging
 import time
 from pathlib import Path
 from dotenv import load_dotenv
+from typing import Callable
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
@@ -240,7 +241,7 @@ def detect_key_error(stderr: str, returncode: int) -> bool:
     return any(kw in err_lower for kw in keywords)
 
 
-async def run_claude(prompt: str, session_id: str | None = None, key_config: dict | None = None, settings: dict | None = None, on_text_chunk: callable | None = None) -> tuple[str, str | None, bool]:
+async def run_claude(prompt: str, session_id: str | None = None, key_config: dict | None = None, settings: dict | None = None, on_text_chunk: Callable | None = None) -> tuple[str, str | None, bool]:
     """
     异步调用 claude -p --output-format stream-json，返回 (响应文本, 新session_id, 是否key错误)。
     key_config: {"name": ..., "api_key": ..., "base_url": ...}
