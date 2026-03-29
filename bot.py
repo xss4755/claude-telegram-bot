@@ -275,6 +275,8 @@ async def run_claude(prompt: str, session_id: str | None = None, key_config: dic
     logger.info("执行: %s (session=%s, key=%s, cwd=%s)",
                 " ".join(str(c) for c in cmd[:-1]) + " [prompt]", session_id,
                 key_config.get("name") if key_config else "default", WORK_DIR)
+    logger.info("完整命令: %s", " ".join(cmd[:-1]) + f" '{cmd[-1][:50]}...'")
+    logger.info("环境变量: CLAUDE_BIN=%s, PATH=%s", CLAUDE_BIN, env.get("PATH", "未设置"))
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
