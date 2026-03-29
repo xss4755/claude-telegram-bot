@@ -1,5 +1,7 @@
 # claude-telegram-bot
 
+[中文文档](README.zh.md) | English
+
 A Telegram bot that bridges messages to [Claude Code CLI](https://github.com/anthropics/claude-code), enabling you to interact with Claude Code from anywhere via Telegram.
 
 ## Features
