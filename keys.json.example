@@ -1,0 +1,17 @@
+{
+  "current": "default",
+  "keys": [
+    {
+      "name": "default",
+      "api_key": "sk-ant-your-key-here",
+      "base_url": "",
+      "enabled": true
+    },
+    {
+      "name": "proxy1",
+      "api_key": "sk-ant-another-key",
+      "base_url": "https://api.example.com",
+      "enabled": true
+    }
+  ]
+}

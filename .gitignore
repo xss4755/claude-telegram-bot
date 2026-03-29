@@ -1,6 +1,7 @@
 # 运行时敏感文件
 .env
 sessions.json
+keys.json
 
 # 日志
 bot.log
