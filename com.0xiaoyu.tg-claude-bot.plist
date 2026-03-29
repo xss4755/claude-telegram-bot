@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.0xiaoyu.tg-claude-bot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/0xiaoyu/code/tg-claude/start.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/0xiaoyu/code/tg-claude</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/0xiaoyu/code/tg-claude/bot.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/0xiaoyu/code/tg-claude/bot.error.log</string>
+</dict>
+</plist>

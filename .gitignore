@@ -1,0 +1,18 @@
+# 运行时敏感文件
+.env
+sessions.json
+
+# 日志
+bot.log
+bot.error.log
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# macOS
+.DS_Store
