@@ -45,8 +45,8 @@ case "$cmd" in
         echo -e "${RED}错误: plist 文件不存在: $PLIST_SRC${NC}"
         exit 1
       fi
-      cp "$PLIST_SRC" "$PLIST_DST"
-      echo "已复制 plist → $PLIST_DST"
+      sed "s|/path/to/tg-claude|${SCRIPT_DIR}|g" "$PLIST_SRC" > "$PLIST_DST"
+      echo "已生成 plist → $PLIST_DST"
 
       # 若已加载先卸载
       if launchctl print "$SERVICE" &>/dev/null 2>&1; then
