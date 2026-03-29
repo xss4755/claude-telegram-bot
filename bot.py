@@ -240,17 +240,18 @@ def detect_key_error(stderr: str, returncode: int) -> bool:
     return any(kw in err_lower for kw in keywords)
 
 
-async def run_claude(prompt: str, session_id: str | None = None, key_config: dict | None = None, settings: dict | None = None) -> tuple[str, str | None, bool]:
+async def run_claude(prompt: str, session_id: str | None = None, key_config: dict | None = None, settings: dict | None = None, on_text_chunk: callable | None = None) -> tuple[str, str | None, bool]:
     """
     异步调用 claude -p --output-format stream-json，返回 (响应文本, 新session_id, 是否key错误)。
     key_config: {"name": ..., "api_key": ..., "base_url": ...}
     settings: {"effort": ..., "model": ..., "plan_mode": ...}
+    on_text_chunk: 流式回调函数，接收每个文本块
     """
     cmd = [
         CLAUDE_BIN, "-p",
         "--output-format", "stream-json",
-        "--verbose",                        # 新版 CLI 要求；旧版兼容无副作用
-        # "--dangerously-skip-permissions" 移除，改用环境变量注入，兼容 root 环境
+        "--verbose",
+        "--include-partial-messages",       # 流式输出：实时推送 partial chunks
     ]
     if session_id:
         cmd += ["--resume", session_id]
@@ -293,42 +294,62 @@ async def run_claude(prompt: str, session_id: str | None = None, key_config: dic
     )
     logger.info("⏱ subprocess 启动耗时: %.2fs", time.time() - t_start)
 
-    # 添加超时机制，避免长时间执行阻塞 Telegram 响应
+    # 动态超时：根据 effort 设置
+    timeout_map = {"low": 60, "medium": 120, "high": 180, "max": 180}
+    timeout = timeout_map.get(settings.get("effort") if settings else None, 120)
+
+    text_parts = []
+    new_session_id = None
     t_exec = time.time()
+
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
-    except asyncio.TimeoutError:
+        while True:
+            try:
+                line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=5)
+            except asyncio.TimeoutError:
+                if time.time() - t_exec > timeout:
+                    proc.kill()
+                    await proc.wait()
+                    logger.error("Claude CLI 执行超时（%ds），已终止", timeout)
+                    return f"❌ 执行超时（{timeout}秒），已终止进程", None, False
+                continue
+
+            if not line_bytes:
+                break
+
+            line = line_bytes.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+
+            try:
+                obj = json.loads(line)
+                if obj.get("type") == "assistant":
+                    for block in obj.get("message", {}).get("content", []):
+                        if block.get("type") == "text":
+                            chunk = block["text"]
+                            text_parts.append(chunk)
+                            if on_text_chunk:
+                                await on_text_chunk(chunk)
+                if obj.get("type") == "result":
+                    new_session_id = obj.get("session_id")
+            except json.JSONDecodeError:
+                pass
+
+        await proc.wait()
+        stderr = await proc.stderr.read()
+        stderr_text = stderr.decode("utf-8", errors="replace").strip()
+
+    except Exception as e:
         proc.kill()
         await proc.wait()
-        logger.error("Claude CLI 执行超时（120秒），已终止")
-        return "❌ 执行超时（2分钟），已终止进程", None, False
+        raise
     finally:
         logger.info("⏱ claude 执行总耗时: %.2fs", time.time() - t_exec)
 
-    stderr_text = stderr.decode("utf-8", errors="replace").strip()
     is_key_error = detect_key_error(stderr_text, proc.returncode)
-
     if proc.returncode != 0:
         logger.error("claude 退出码 %d: %s", proc.returncode, stderr_text)
         return f"❌ 执行出错（退出码 {proc.returncode}）:\n{stderr_text or '无错误信息'}", None, is_key_error
-
-    # 解析 stream-json：每行一个 JSON 对象
-    text_parts = []
-    new_session_id = None
-    for line in stdout.decode("utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-            if obj.get("type") == "assistant":
-                for block in obj.get("message", {}).get("content", []):
-                    if block.get("type") == "text":
-                        text_parts.append(block["text"])
-            if obj.get("type") == "result":
-                new_session_id = obj.get("session_id")
-        except json.JSONDecodeError:
-            pass
 
     response_text = "".join(text_parts).strip() or "（无输出）"
     return response_text, new_session_id, False
@@ -636,18 +657,30 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     thinking = await update.message.reply_text("⏳ 正在处理，请稍候...")
     t_msg = time.time()
 
-    # 进度计时器：每 15 秒更新等待提示
-    async def _tick():
-        """每 15 秒更新等待提示，显示已等待时间"""
-        while True:
-            await asyncio.sleep(15)
-            elapsed = int(time.time() - t_msg)
-            try:
-                await thinking.edit_text(f"⏳ 正在处理，请稍候...（已等待 {elapsed}s）")
-            except Exception:
-                pass  # 编辑失败不影响主流程
+    # 流式推送状态
+    accumulated_text = ""
+    last_push_time = time.time()
+    last_push_len = 0
+    PUSH_INTERVAL = 1.5
+    PUSH_THRESHOLD = 200
 
-    timer = asyncio.create_task(_tick())
+    async def on_text_chunk(chunk: str):
+        """流式回调：累积文本并限频推送"""
+        nonlocal accumulated_text, last_push_time, last_push_len
+        accumulated_text += chunk
+        now = time.time()
+        new_chars = len(accumulated_text) - last_push_len
+
+        if (now - last_push_time >= PUSH_INTERVAL) or (new_chars >= PUSH_THRESHOLD):
+            preview = accumulated_text[:MAX_MSG_LEN]
+            if len(accumulated_text) > MAX_MSG_LEN:
+                preview += "\n\n[预览模式：内容较长，完成后将分段发送完整内容]"
+            try:
+                await thinking.edit_text(preview)
+                last_push_time = now
+                last_push_len = len(accumulated_text)
+            except Exception as e:
+                logger.warning("edit_text 失败: %s", e)
 
     try:
         session_id = get_session(uid)
@@ -668,7 +701,10 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         for attempt, key_config in enumerate(retry_queue):
             try:
-                result, new_session_id, is_key_error = await run_claude(prompt, session_id, key_config, effective_settings)
+                result, new_session_id, is_key_error = await run_claude(
+                    prompt, session_id, key_config, effective_settings,
+                    on_text_chunk=on_text_chunk
+                )
             except Exception as e:
                 logger.exception("run_claude 异常")
                 await thinking.edit_text(f"❌ 内部错误：{e}")
@@ -679,6 +715,8 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             # Key 错误，尝试下一个
             if attempt < len(retry_queue) - 1:
+                accumulated_text = ""
+                last_push_len = 0
                 next_key = retry_queue[attempt + 1]
                 key_name = key_config.get("name", "未知")
                 next_name = next_key.get("name", "未知")
@@ -694,7 +732,6 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         for chunk in split_text(result):
             await update.message.reply_text(chunk)
     finally:
-        timer.cancel()
         logger.info("⏱ handle_message 总耗时: %.2fs", time.time() - t_msg)
 
 
