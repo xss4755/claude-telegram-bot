@@ -7,6 +7,8 @@
 - **白名单鉴权** — 仅允许指定 Telegram 用户 ID 操作
 - **会话持久化** — 通过 `--resume` + `stream-json` 的 `session_id` 实现跨消息上下文连续
 - **多 API Key 管理** — 配置多个 API Key，出错时自动故障转移
+- **Claude 参数调节** — 支持 `/set` 命令持久化设置 effort / model / plan 模式
+- **内联标记语法** — 消息前缀 `@max`、`@plan`、`@opus` 等可单次临时覆盖设置
 - **智能切换** — 系统环境变量优先，出错后自动切换到 keys.json 配置
 - **流式 JSON 解析** — 正确解析 Claude Code 的 `stream-json` 输出格式
 - **跨平台服务管理** — `manage.sh` 同时支持 macOS（launchd）和 Linux（systemd）
@@ -74,7 +76,8 @@ cp keys.json.example keys.json
 |------|------|
 | `/start` | 欢迎信息与帮助 |
 | `/new` | 清除上下文，开启全新会话 |
-| `/status` | 查看当前 session ID 和工作目录 |
+| `/status` | 查看当前 session ID、工作目录和 Claude 参数设置 |
+| `/set` | 调整 Claude 参数（effort / model / plan 模式） |
 | `/key` | 管理 API Key（查看/切换/添加/删除） |
 | `/restart` | 重启 Bot 进程（launchd/systemd 会自动拉起） |
 | `/id` | 查看你的 Telegram 用户 ID |
@@ -84,6 +87,32 @@ cp keys.json.example keys.json
 - `/key use <name>` — 切换到指定 Key
 - `/key add <name> <api_key> [base_url]` — 添加新 Key
 - `/key remove <name>` — 删除 Key
+
+**Claude 参数设置（持久化）：**
+- `/set` — 查看当前所有参数设置
+- `/set effort <low|medium|high|max>` — 设置思考深度
+- `/set model <sonnet|opus|haiku>` — 指定模型（`/set model` 恢复默认）
+- `/set plan <on|off>` — 开启/关闭 Plan 模式（先规划再执行）
+- `/set reset` — 重置所有设置为默认值
+
+**内联标记（单次临时覆盖，不影响持久化设置）：**
+
+在消息开头添加 `@标记` 可临时覆盖本次请求的参数：
+
+| 标记 | 效果 |
+|------|------|
+| `@plan` | 本次使用 Plan 模式 |
+| `@low` / `@med` / `@high` / `@max` | 本次设置 effort 级别 |
+| `@sonnet` / `@opus` / `@haiku` | 本次指定模型 |
+
+支持组合使用（空格或紧贴均可）：
+```
+@plan@max 帮我设计一个用户认证系统
+@opus 把这段代码翻译成 Go
+@plan @high 分析这个项目的架构问题
+```
+
+**参数优先级：** 内联标记 > `/set` 持久化设置 > CLI 默认值
 
 直接发送普通文本消息即可与 Claude Code 在配置的工作目录中对话。
 
@@ -111,15 +140,16 @@ macOS 下以 LaunchAgent 运行，崩溃后自动重启。Linux 下执行 `login
 
 ## 工作原理
 
-1. 用户向 Telegram Bot 发送消息
-2. Bot 从 `sessions.json` 中查找该用户上次的 `session_id`
-3. 在 `CLAUDE_WORK_DIR` 下执行：`claude -p --output-format stream-json [--resume <session_id>] "<prompt>"`
-4. 解析 stream-json 输出，提取 assistant 文本和新的 `session_id`
-5. 将新 `session_id` 写回文件以保持上下文，然后回复用户
+1. 用户向 Telegram Bot 发送消息（可携带内联标记）
+2. Bot 解析内联标记，合并用户持久化设置，得到本次生效的参数
+3. 从 `sessions.json` 中查找该用户上次的 `session_id`
+4. 在 `CLAUDE_WORK_DIR` 下执行：`claude -p --output-format stream-json [--resume <session_id>] [--effort <level>] [--model <name>] "<prompt>"`
+5. 解析 stream-json 输出，提取 assistant 文本和新的 `session_id`
+6. 将新 `session_id` 写回文件以保持上下文，然后回复用户
 
 ## 安全说明
 
-- `.env`（含 Token 和用户 ID）及 `sessions.json` 均已通过 `.gitignore` 排除在版本控制之外
+- `.env`、`sessions.json`、`keys.json`、`settings.json` 均已通过 `.gitignore` 排除在版本控制之外
 - 只有 `TG_ALLOWED_IDS` 中列出的用户才能触发 Claude Code 执行
 - Bot 使用 `--dangerously-skip-permissions` 以支持非交互式运行，请确保 `CLAUDE_WORK_DIR` 和授权用户均可信
 

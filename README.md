@@ -9,6 +9,8 @@ A Telegram bot that bridges messages to [Claude Code CLI](https://github.com/ant
 - **Whitelist auth** — Only specified Telegram user IDs can interact with the bot
 - **Session persistence** — Conversations resume across messages using `--resume` (stream-json session_id)
 - **Multi-API Key management** — Configure multiple API keys with automatic failover when one fails
+- **Claude parameter tuning** — `/set` command to persistently configure effort / model / plan mode
+- **Inline flag syntax** — Prefix messages with `@max`, `@plan`, `@opus`, etc. to override settings for a single request
 - **Smart key switching** — System environment variables take priority, falls back to keys.json on error
 - **Stream-JSON parsing** — Properly parses Claude Code's `stream-json` output format
 - **Cross-platform service management** — `manage.sh` supports both macOS (launchd) and Linux (systemd)
@@ -76,7 +78,8 @@ When a key fails (401/403/rate limit), the bot automatically switches to the nex
 |---------|-------------|
 | `/start` | Welcome message & help |
 | `/new` | Clear context and start a fresh session |
-| `/status` | Show current session ID and working directory |
+| `/status` | Show current session ID, working directory, and Claude parameter settings |
+| `/set` | Adjust Claude parameters (effort / model / plan mode) |
 | `/key` | Manage API keys (view/switch/add/remove) |
 | `/restart` | Restart the bot process (launchd/systemd will auto-revive) |
 | `/id` | Display your Telegram user ID |
@@ -86,6 +89,32 @@ When a key fails (401/403/rate limit), the bot automatically switches to the nex
 - `/key use <name>` — Switch to a specific key
 - `/key add <name> <api_key> [base_url]` — Add a new key
 - `/key remove <name>` — Remove a key
+
+**Claude Parameter Settings (persistent):**
+- `/set` — View all current parameter settings
+- `/set effort <low|medium|high|max>` — Set thinking depth
+- `/set model <sonnet|opus|haiku>` — Specify model (`/set model` resets to default)
+- `/set plan <on|off>` — Enable/disable Plan mode (plan first, then execute)
+- `/set reset` — Reset all settings to defaults
+
+**Inline Flags (single-request override, does not affect persistent settings):**
+
+Prefix your message with `@flag` to temporarily override parameters for that request only:
+
+| Flag | Effect |
+|------|--------|
+| `@plan` | Use Plan mode for this request |
+| `@low` / `@med` / `@high` / `@max` | Set effort level for this request |
+| `@sonnet` / `@opus` / `@haiku` | Use specified model for this request |
+
+Flags can be combined (space-separated or concatenated):
+```
+@plan@max Design a user authentication system
+@opus Translate this code to Go
+@plan @high Analyze the architecture of this project
+```
+
+**Parameter priority:** Inline flags > `/set` persistent settings > CLI defaults
 
 Send any plain text message to chat with Claude Code in the configured working directory.
 
@@ -113,15 +142,16 @@ On macOS, the service runs as a LaunchAgent and restarts automatically after cra
 
 ## How It Works
 
-1. User sends a message to the Telegram bot
-2. Bot looks up the user's last `session_id` from `sessions.json`
-3. Runs `claude -p --output-format stream-json [--resume <session_id>] "<prompt>"` in `CLAUDE_WORK_DIR`
-4. Parses the stream-json output to extract the assistant's text and new `session_id`
-5. Saves the new `session_id` for continuity, then replies to the user
+1. User sends a message to the Telegram bot (optionally prefixed with inline flags)
+2. Bot parses inline flags and merges them with the user's persistent settings to determine effective parameters
+3. Bot looks up the user's last `session_id` from `sessions.json`
+4. Runs `claude -p --output-format stream-json [--resume <session_id>] [--effort <level>] [--model <name>] "<prompt>"` in `CLAUDE_WORK_DIR`
+5. Parses the stream-json output to extract the assistant's text and new `session_id`
+6. Saves the new `session_id` for continuity, then replies to the user
 
 ## Security Notes
 
-- `.env` and `sessions.json` are excluded from git via `.gitignore`
+- `.env`, `sessions.json`, `keys.json`, and `settings.json` are all excluded from git via `.gitignore`
 - Only users in `TG_ALLOWED_IDS` can trigger Claude Code execution
 - The bot uses `--dangerously-skip-permissions` for non-interactive use — ensure your `CLAUDE_WORK_DIR` and allowed users are trusted
 
