@@ -6,6 +6,7 @@ Telegram Bot → Claude Code 控制器
 """
 
 import os
+import re
 import signal
 import json
 import asyncio
@@ -135,6 +136,7 @@ class SettingsManager:
 
     def __init__(self):
         self.data = self._load()
+        self._lock = asyncio.Lock()
 
     def _load(self) -> dict:
         if SETTINGS_FILE.exists():
@@ -145,25 +147,30 @@ class SettingsManager:
         return {}
 
     def _save(self):
-        SETTINGS_FILE.write_text(json.dumps(self.data, indent=2, ensure_ascii=False))
+        # 写入临时文件再 rename，保证原子性，防止写入中途崩溃损坏文件
+        tmp = SETTINGS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.data, indent=2, ensure_ascii=False))
+        tmp.replace(SETTINGS_FILE)
 
     def get(self, uid: int) -> dict:
         """获取用户设置（带默认值）"""
         user_settings = self.data.get(str(uid), {})
         return {**self.DEFAULT, **user_settings}
 
-    def set(self, uid: int, key: str, value):
-        """更新用户设置"""
-        uid_str = str(uid)
-        if uid_str not in self.data:
-            self.data[uid_str] = {}
-        self.data[uid_str][key] = value
-        self._save()
+    async def set_async(self, uid: int, key: str, value):
+        """更新用户设置（异步，带锁）"""
+        async with self._lock:
+            uid_str = str(uid)
+            if uid_str not in self.data:
+                self.data[uid_str] = {}
+            self.data[uid_str][key] = value
+            self._save()
 
-    def reset(self, uid: int):
-        """重置用户设置"""
-        self.data.pop(str(uid), None)
-        self._save()
+    async def reset_async(self, uid: int):
+        """重置用户设置（异步，带锁）"""
+        async with self._lock:
+            self.data.pop(str(uid), None)
+            self._save()
 
 
 settings_manager = SettingsManager()
@@ -244,6 +251,8 @@ async def run_claude(prompt: str, session_id: str | None = None, key_config: dic
 
     # 注入用户设置
     if settings:
+        # medium 是 Claude CLI 的默认值，无需显式传递，避免命令行噪音
+        # 注意：若未来 CLI 改变默认值，此处需同步更新
         if settings.get("effort") and settings["effort"] != "medium":
             cmd += ["--effort", settings["effort"]]
         if settings.get("model"):
@@ -323,7 +332,6 @@ def parse_inline_flags(text: str) -> tuple[dict, str]:
     支持紧贴写法：@plan@max 深度分析代码
     → ({"plan_mode": True, "effort": "max"}, "深度分析代码")
     """
-    import re
     overrides = {}
     # 匹配开头连续的 @xxx（支持空格或紧贴）
     # 先把紧贴的 @xxx@yyy 拆成多个 token
@@ -506,7 +514,7 @@ async def cmd_set(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "`/set reset` — 重置所有设置\n\n"
             "💡 发消息时可用内联标记临时覆盖，例如：\n"
             "`@max 深度分析这段代码`\n"
-            "`@plan@opus 设计数据库架构`"
+            "`@plan@max 设计数据库架构`"
         )
         await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
         return
@@ -522,7 +530,7 @@ async def cmd_set(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
         value = args[1].lower()
-        settings_manager.set(uid, "effort", value)
+        await settings_manager.set_async(uid, "effort", value)
         await update.message.reply_text(
             f"✅ Effort 已设置为：`{value}`",
             parse_mode=ParseMode.MARKDOWN
@@ -532,7 +540,7 @@ async def cmd_set(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         valid = {"sonnet", "opus", "haiku"}
         if len(args) < 2:
             # 清空模型设置，恢复默认
-            settings_manager.set(uid, "model", "")
+            await settings_manager.set_async(uid, "model", "")
             await update.message.reply_text("✅ 模型已恢复为默认值", parse_mode=ParseMode.MARKDOWN)
         elif args[1].lower() not in valid:
             await update.message.reply_text(
@@ -541,7 +549,7 @@ async def cmd_set(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         else:
             value = args[1].lower()
-            settings_manager.set(uid, "model", value)
+            await settings_manager.set_async(uid, "model", value)
             await update.message.reply_text(
                 f"✅ 模型已设置为：`{value}`",
                 parse_mode=ParseMode.MARKDOWN
@@ -555,7 +563,7 @@ async def cmd_set(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
         value = args[1].lower() == "on"
-        settings_manager.set(uid, "plan_mode", value)
+        await settings_manager.set_async(uid, "plan_mode", value)
         status = "✅ 开启" if value else "❌ 关闭"
         await update.message.reply_text(
             f"✅ Plan 模式已{status}",
@@ -563,7 +571,7 @@ async def cmd_set(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
     elif subcmd == "reset":
-        settings_manager.reset(uid)
+        await settings_manager.reset_async(uid)
         await update.message.reply_text("✅ 所有设置已重置为默认值", parse_mode=ParseMode.MARKDOWN)
 
     else:
