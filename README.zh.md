@@ -143,7 +143,7 @@ macOS 下以 LaunchAgent 运行，崩溃后自动重启。Linux 下执行 `login
 1. 用户向 Telegram Bot 发送消息（可携带内联标记）
 2. Bot 解析内联标记，合并用户持久化设置，得到本次生效的参数
 3. 从 `sessions.json` 中查找该用户上次的 `session_id`
-4. 在 `CLAUDE_WORK_DIR` 下执行：`claude -p --output-format stream-json [--resume <session_id>] [--effort <level>] [--model <name>] "<prompt>"`
+4. 在 `CLAUDE_WORK_DIR` 下执行：`claude -p --output-format stream-json --verbose [--resume <session_id>] [--effort <level>] [--model <name>] "<prompt>"`（通过环境变量注入 `CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1`）
 5. 解析 stream-json 输出，提取 assistant 文本和新的 `session_id`
 6. 将新 `session_id` 写回文件以保持上下文，然后回复用户
 
@@ -151,7 +151,8 @@ macOS 下以 LaunchAgent 运行，崩溃后自动重启。Linux 下执行 `login
 
 - `.env`、`sessions.json`、`keys.json`、`settings.json` 均已通过 `.gitignore` 排除在版本控制之外
 - 只有 `TG_ALLOWED_IDS` 中列出的用户才能触发 Claude Code 执行
-- Bot 使用 `--dangerously-skip-permissions` 以支持非交互式运行，请确保 `CLAUDE_WORK_DIR` 和授权用户均可信
+- Bot 通过环境变量 `CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1` 支持非交互式运行，请确保 `CLAUDE_WORK_DIR` 和授权用户均可信
+- 稳定性保障：300 秒超时防止进程挂起，`stdin=DEVNULL` 防止 CLI 等待输入阻塞，`--verbose` 确保非交互模式下输出稳定
 
 ## License
 
