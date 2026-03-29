@@ -6,6 +6,8 @@
 
 - **白名单鉴权** — 仅允许指定 Telegram 用户 ID 操作
 - **会话持久化** — 通过 `--resume` + `stream-json` 的 `session_id` 实现跨消息上下文连续
+- **多 API Key 管理** — 配置多个 API Key，出错时自动故障转移
+- **智能切换** — 系统环境变量优先，出错后自动切换到 keys.json 配置
 - **流式 JSON 解析** — 正确解析 Claude Code 的 `stream-json` 输出格式
 - **跨平台服务管理** — `manage.sh` 同时支持 macOS（launchd）和 Linux（systemd）
 - **自动重启** — 崩溃后服务自动恢复，重启后 Bot 主动推送通知
@@ -45,8 +47,26 @@ cp .env.example .env
 | `TG_ALLOWED_IDS` | 允许使用 Bot 的 Telegram 用户 ID，逗号分隔 | `123456789,987654321` |
 | `CLAUDE_WORK_DIR` | Claude Code 的工作目录（执行命令的根目录） | `/home/user/projects` |
 | `CLAUDE_BIN` | `claude` 可执行文件的完整路径（`which claude`） | `/opt/homebrew/bin/claude` |
+| `ANTHROPIC_API_KEY` | （可选）默认 API Key，优先于 keys.json | `sk-ant-...` |
+| `ANTHROPIC_BASE_URL` | （可选）自定义 API 端点（代理/中转） | `https://api.example.com` |
 
 > **提示：** 不知道自己的 Telegram ID？启动 Bot 后发送 `/id`，Bot 会回复你的数字 ID。
+
+### 多 API Key 配置
+
+可以通过 `keys.json` 管理多个 API Key，实现自动故障转移：
+
+```bash
+# 复制配置模板
+cp keys.json.example keys.json
+# 编辑 keys.json 填入你的 API Key
+```
+
+**优先级顺序：**
+1. 系统环境变量（`ANTHROPIC_API_KEY`）— 优先尝试
+2. keys.json 中的 Key — 系统 Key 失败后依次尝试
+
+当 Key 出错（401/403/rate limit）时，Bot 自动切换到下一个可用 Key 并清除会话。
 
 ## Bot 命令
 
@@ -55,8 +75,15 @@ cp .env.example .env
 | `/start` | 欢迎信息与帮助 |
 | `/new` | 清除上下文，开启全新会话 |
 | `/status` | 查看当前 session ID 和工作目录 |
+| `/key` | 管理 API Key（查看/切换/添加/删除） |
 | `/restart` | 重启 Bot 进程（launchd/systemd 会自动拉起） |
 | `/id` | 查看你的 Telegram 用户 ID |
+
+**API Key 管理：**
+- `/key` — 列出所有配置的 Key（脱敏显示）
+- `/key use <name>` — 切换到指定 Key
+- `/key add <name> <api_key> [base_url]` — 添加新 Key
+- `/key remove <name>` — 删除 Key
 
 直接发送普通文本消息即可与 Claude Code 在配置的工作目录中对话。
 

@@ -8,6 +8,8 @@ A Telegram bot that bridges messages to [Claude Code CLI](https://github.com/ant
 
 - **Whitelist auth** — Only specified Telegram user IDs can interact with the bot
 - **Session persistence** — Conversations resume across messages using `--resume` (stream-json session_id)
+- **Multi-API Key management** — Configure multiple API keys with automatic failover when one fails
+- **Smart key switching** — System environment variables take priority, falls back to keys.json on error
 - **Stream-JSON parsing** — Properly parses Claude Code's `stream-json` output format
 - **Cross-platform service management** — `manage.sh` supports both macOS (launchd) and Linux (systemd)
 - **Auto-restart** — Service restarts automatically on crash; bot sends a notification on startup
@@ -47,8 +49,26 @@ Edit `.env` with the following variables:
 | `TG_ALLOWED_IDS` | Comma-separated Telegram user IDs allowed to use the bot | `123456789,987654321` |
 | `CLAUDE_WORK_DIR` | Working directory where Claude Code runs | `/home/user/projects` |
 | `CLAUDE_BIN` | Path to the `claude` executable | `/opt/homebrew/bin/claude` |
+| `ANTHROPIC_API_KEY` | (Optional) Default API key, takes priority over keys.json | `sk-ant-...` |
+| `ANTHROPIC_BASE_URL` | (Optional) Custom API endpoint (proxy/relay) | `https://api.example.com` |
 
 > **Tip:** Don't know your Telegram ID? Start the bot and send `/id` — it replies with your numeric ID.
+
+### Multi-API Key Setup
+
+You can manage multiple API keys using `keys.json` for automatic failover:
+
+```bash
+# Copy the example config
+cp keys.json.example keys.json
+# Edit keys.json with your API keys
+```
+
+**Priority order:**
+1. System environment variable (`ANTHROPIC_API_KEY`) — tried first
+2. Keys in `keys.json` — tried sequentially if system key fails
+
+When a key fails (401/403/rate limit), the bot automatically switches to the next available key and clears the session.
 
 ## Bot Commands
 
@@ -57,8 +77,15 @@ Edit `.env` with the following variables:
 | `/start` | Welcome message & help |
 | `/new` | Clear context and start a fresh session |
 | `/status` | Show current session ID and working directory |
+| `/key` | Manage API keys (view/switch/add/remove) |
 | `/restart` | Restart the bot process (launchd/systemd will auto-revive) |
 | `/id` | Display your Telegram user ID |
+
+**API Key Management:**
+- `/key` — List all configured keys (masked)
+- `/key use <name>` — Switch to a specific key
+- `/key add <name> <api_key> [base_url]` — Add a new key
+- `/key remove <name>` — Remove a key
 
 Send any plain text message to chat with Claude Code in the configured working directory.
 
