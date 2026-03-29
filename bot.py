@@ -248,6 +248,7 @@ async def run_claude(prompt: str, session_id: str | None = None, key_config: dic
     cmd = [
         CLAUDE_BIN, "-p",
         "--output-format", "stream-json",
+        "--verbose",
     ]
     if session_id:
         cmd += ["--resume", session_id]
